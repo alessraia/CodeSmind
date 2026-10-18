@@ -1,0 +1,272 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Any, Optional
+
+
+class ProviderKind(str, Enum):
+    LOCAL = "local"
+    API = "api"
+
+
+class PromptMode(str, Enum):
+    DEFAULT = "default"
+    DRAFT = "draft"
+    DRAFT_IF_AVAILABLE = "draft_if_available"
+
+
+class NormalizationMode(str, Enum):
+    """
+    Controls how tolerant the orchestrator is when normalizing LLM output.
+
+    STRICT:
+        Accept only responses that fully match the declared CodeSmile
+        assessment + findings contract.
+
+    SALVAGE:
+        Best-effort recovery used mainly during Prompt Engineering.
+        Markdown fences, surrounding prose, and selected alternate field
+        names may be tolerated when useful information can still be recovered.
+    """
+
+    STRICT = "strict"
+    SALVAGE = "salvage"
+
+class DetectionStatus(str, Enum):
+    SUCCESS = "success"
+    INVALID_RESPONSE = "invalid_response"
+    PROVIDER_ERROR = "provider_error"
+
+
+@dataclass(frozen=True)
+class LLMGenerationResult:
+    """
+    Complete result returned by an LLM provider.
+
+    response:
+        Final assistant output consumed by the orchestrator.
+
+    native_reasoning:
+        Optional provider-native thinking/reasoning trace.
+        This is NOT the user-facing CodeSmile reasoning.
+
+    metadata:
+        Provider metadata such as model, token usage, latency,
+        finish reason, request ID, etc.
+
+    raw_provider_response:
+        Complete provider response when available.
+        Particularly useful for paid API calls, debugging,
+        inspection, and reproducibility.
+    """
+
+    response: str
+    native_reasoning: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
+    raw_provider_response: Optional[str] = None
+
+
+@dataclass
+class LLMProviderDefinition:
+    """
+    Persisted configuration for a provider selectable from the UI.
+
+    Secrets such as API keys should not be stored in this object.
+    """
+
+    provider_id: str
+    kind: ProviderKind
+    display_name: str
+    config: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class LLMSmellDefinition:
+    """
+    A code smell that can be detected through LLM prompts.
+    """
+
+    smell_id: str
+    display_name: str
+    description: str
+    default_prompt: str
+    draft_prompt: Optional[str] = None
+    created_by_user: bool = True
+
+    # A smell becomes usable for detection once a default prompt
+    # has been saved and detection has been enabled.
+    enabled: bool = False
+
+    def is_ready_for_detection(self) -> bool:
+        return self.enabled and bool(self.default_prompt.strip())
+
+    def get_prompt(self, prompt_mode: PromptMode) -> str:
+        if prompt_mode == PromptMode.DEFAULT:
+            if not self.default_prompt.strip():
+                raise ValueError(
+                    f"Default prompt is empty for smell_id='{self.smell_id}'"
+                )
+            return self.default_prompt
+
+        if prompt_mode == PromptMode.DRAFT:
+            if self.draft_prompt is None or not self.draft_prompt.strip():
+                raise ValueError(
+                    f"No draft prompt available for smell_id='{self.smell_id}'"
+                )
+            return self.draft_prompt
+        if prompt_mode == PromptMode.DRAFT_IF_AVAILABLE:
+            if self.draft_prompt is not None and self.draft_prompt.strip():
+                return self.draft_prompt
+            if not self.default_prompt.strip():
+                raise ValueError(
+                    f"No default prompt available for smell_id='{self.smell_id}'"
+                )
+            return self.default_prompt
+        raise ValueError(f"Unknown prompt_mode: {prompt_mode}")
+
+    def save_draft_as_default(self) -> None:
+        """Promote the current draft prompt to default and enable detection."""
+        if self.draft_prompt is None or not self.draft_prompt.strip():
+            raise ValueError(
+                f"Cannot promote empty draft to default for smell_id='{self.smell_id}'"
+            )
+
+        self.default_prompt = self.draft_prompt
+        self.enabled = True
+
+
+@dataclass
+class LLMCatalog:
+    """Root persisted object for CR01 (smells + prompts + providers)."""
+
+    schema_version: int = 1
+    smells: list[LLMSmellDefinition] = field(default_factory=list)
+    providers: list[LLMProviderDefinition] = field(default_factory=list)
+
+    def get_smell(self, smell_id: str) -> LLMSmellDefinition:
+        for smell in self.smells:
+            if smell.smell_id == smell_id:
+                return smell
+        raise KeyError(f"Unknown smell_id: {smell_id}")
+
+    def upsert_smell(self, smell: LLMSmellDefinition) -> None:
+        for index, existing in enumerate(self.smells):
+            if existing.smell_id == smell.smell_id:
+                self.smells[index] = smell
+                return
+
+        self.smells.append(smell)
+
+    def get_provider(self, provider_id: str) -> LLMProviderDefinition:
+        for provider in self.providers:
+            if provider.provider_id == provider_id:
+                return provider
+
+        raise KeyError(
+            f"Unknown provider_id: {provider_id}"
+        )
+
+    def upsert_provider(
+        self,
+        provider: LLMProviderDefinition,
+    ) -> None:
+        for index, existing in enumerate(
+            self.providers
+        ):
+            if existing.provider_id == provider.provider_id:
+                self.providers[index] = provider
+                return
+        self.providers.append(provider)
+
+
+@dataclass(frozen=True)
+class DetectionTarget:
+    """
+    Source-code unit submitted to the LLM orchestrator.
+    """
+
+    filename: str
+    code: str
+
+
+@dataclass(frozen=True)
+class LLMSmellFinding:
+    """
+    Normalized occurrence of an LLM-detected code smell.
+
+    description:
+        Short description of what was detected.
+
+    reasoning:
+        Concise, evidence-based explanation of why the specific
+        occurrence matches the smell definition or detection rule.
+
+    mitigation:
+        Concise and actionable recommendation describing how the
+        developer can address or mitigate the specific occurrence.
+
+        A mitigation is a recommendation, not an automatically
+        applied refactoring and not a guarantee that program behavior
+        will remain unchanged.
+
+    additional_info:
+        Optional supplementary information that is not already covered
+        by description, reasoning, or mitigation.
+    """
+
+    filename: str
+    function_name: str
+    smell_name: str
+    line: int
+    description: str
+
+    reasoning: str = ""
+    additional_info: str = ""
+    mitigation: str = ""
+
+    smell_id: Optional[str] = None
+    confidence: Optional[float] = None
+    raw_response: Optional[str] = None
+
+    def to_overview_row(self) -> dict[str, Any]:
+        return {
+            "filename": self.filename,
+            "function_name": self.function_name,
+            "smell_name": self.smell_name,
+            "line": self.line,
+            "description": self.description,
+            "reasoning": self.reasoning,
+            "mitigation": self.mitigation,
+            "additional_info": self.additional_info,
+        }
+
+
+@dataclass(frozen=True)
+class DetectionResult:
+    """
+    Result of one file × smell detection.
+
+    assessment:
+        Developer-facing natural-language analysis of the complete
+        file × smell evaluation.
+
+    findings:
+        Normalized machine-readable smell occurrences.
+
+    status:
+        SUCCESS when the response respects the expected contract,
+        INVALID_RESPONSE when an LLM response was received but does
+        not satisfy the contract, or PROVIDER_ERROR when generation
+        failed before a usable response was obtained.
+    """
+
+    filename: str
+    smell_id: str
+    status: DetectionStatus
+    findings: tuple[LLMSmellFinding, ...] = ()
+
+    assessment: str = ""
+
+    raw_response: Optional[str] = None
+    error: Optional[str] = None
