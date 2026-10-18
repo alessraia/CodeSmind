@@ -1,0 +1,138 @@
+Detect the Dataframe Conversion API Misused (DCA) code smell in the provided Python source code.
+
+TASK
+
+Identify every occurrence where the Pandas .values attribute is used to obtain the underlying NumPy array representation of a Pandas DataFrame or Series, instead of using the explicit .to_numpy() API.
+
+Detect only this code smell. Do not report unrelated defects, code complexity, incorrect return values, exception handling issues, or general programming problems.
+
+SMELL DEFINITION
+
+Pandas DataFrame and Series objects expose a .values attribute that returns their underlying array representation.
+
+For explicit NumPy conversion, the preferred API is .to_numpy().
+
+Examples of violations:
+
+    X = df.values
+    y = df["target"].values
+    X = df[feature_columns].values
+    X = df.drop(columns=["target"]).values
+    X = df.iloc[batch_indices, :].values
+    y = df.iloc[batch_indices]["target"].values
+    X = pd.concat(frames, axis=1).values
+    model.fit(df.values, labels)
+    return dataframe.values
+
+Preferred alternatives:
+
+    X = df.to_numpy()
+    y = df["target"].to_numpy()
+    X = df[feature_columns].to_numpy()
+    X = df.drop(columns=["target"]).to_numpy()
+
+DETECTION CRITERIA
+
+Report a violation only when all the following conditions hold:
+
+1. The source contains an actual access to an attribute named .values.
+2. The receiver is a Pandas DataFrame or Pandas Series, as established from the available source code.
+3. The attribute is used to obtain the object's underlying array representation.
+
+The .values attribute may appear in assignments, function arguments, return expressions, chained expressions, indexing operations, or NumPy and PyTorch conversions.
+
+The conversion does not need to be assigned to a variable.
+
+SOURCE ANALYSIS
+
+Analyze the complete source file.
+
+First, locate all explicit accesses to the .values attribute.
+
+Then, for each candidate, establish the receiver's type using the available code.
+
+Consider:
+
+- Pandas constructors such as pd.DataFrame(...) and pd.Series(...).
+- Data loading functions such as pd.read_csv(...) and pd.read_excel(...).
+- Operations returning DataFrames, including pd.concat(...), merge(), join(), drop(), and DataFrame column selection.
+- Operations returning Series, including single-column selection, row selection, and Series transformations.
+- Intermediate variables, function parameters, assignments, and aliases.
+- Chained Pandas operations and expressions.
+- DataFrames or Series created in other functions when their type can be established from the available code.
+
+Distinguish between DataFrame and Series results where relevant.
+
+For example:
+
+    df[["column"]]
+
+typically returns a DataFrame, while:
+
+    df["column"]
+
+typically returns a Series.
+
+Both are eligible when their .values attribute is accessed for array conversion.
+
+Do not restrict detection to variables named df or dataframe. The receiver may have any name.
+
+EXCLUSIONS
+
+Do not report:
+
+- dictionary.values() calls.
+- User-defined values() methods.
+- .values attributes of objects that are not Pandas DataFrames or Series.
+- Enum .value accesses.
+- Other conversion methods, such as .to_numpy(), np.array(...), or np.asarray(...), when no qualifying Pandas .values access occurs.
+- Statements that merely create, manipulate, filter, or concatenate DataFrames without accessing .values.
+- General performance, maintainability, or correctness issues unrelated to this smell.
+- Hypothetical conversions or operations inferred from the purpose of a function.
+- Comments, documentation, or string literals containing .values.
+
+The presence of the word "values" alone does not establish a violation.
+
+In particular, a dictionary.values() call must never be classified as a Pandas conversion.
+
+Do not report an occurrence when the available code establishes that the receiver is not a Pandas DataFrame or Series.
+
+If the receiver's Pandas identity cannot be established with reasonable confidence, exclude the candidate rather than inventing a type relationship.
+
+COMPLETENESS AND LINE ACCURACY
+
+Inspect all functions, methods, conditional branches, loops, and return statements.
+
+Pay particular attention to multiple .values accesses appearing on consecutive lines or within the same function.
+
+Each qualifying .values access must be reported separately.
+
+Use the exact 1-based line number provided with the source code.
+
+The reported line must contain the actual .values attribute access. For multiline expressions, use the line containing the .values token.
+
+Do not report the enclosing function definition or a neighboring statement instead of the actual occurrence.
+
+EVIDENCE VALIDATION
+
+Before including a finding, verify:
+
+1. The cited source contains an actual .values access.
+2. The receiver is a Pandas DataFrame or Series.
+3. The access is used to obtain an array representation.
+4. The finding refers to DCA and not another code smell.
+5. The source location is correct and has not already been reported.
+
+In the reasoning field, quote the exact .values expression found in the source and briefly explain the evidence that its receiver is a Pandas DataFrame or Series.
+
+Do not invent source expressions, receiver types, or line numbers.
+
+FINAL REVIEW
+
+Review the entire source file once more to ensure that no qualifying .values accesses have been overlooked.
+
+Include every confirmed violation, even when multiple violations occur in the same statement, function, or class.
+
+If the file contains no qualifying Pandas .values accesses, return an empty findings array.
+
+Follow the system prompt's required JSON output schema exactly.

@@ -1,0 +1,119 @@
+Detect the Dataframe Conversion API Misused (DCA) code smell in the provided Python source code.
+
+TASK
+
+Identify all explicit accesses to the .values attribute of Pandas DataFrame or Series objects when used to obtain their underlying array representation instead of using .to_numpy().
+
+This is a targeted code smell detection task, not a general code review. Report only DCA violations.
+
+DETECTION RULE
+
+A violation exists when BOTH conditions are satisfied:
+
+1. The source code explicitly accesses an attribute named .values.
+2. The receiver is a Pandas DataFrame or Series, as determined from the available source code.
+
+The .values attribute does not require parentheses. It can appear anywhere inside an expression, including assignments, return statements, function arguments, indexing, reshaping, and tensor or NumPy conversions.
+
+Examples of qualifying patterns:
+
+    array = df.values
+    labels = series.values
+    batch_x = features.iloc[indices, :].values
+    batch_y = labels.iloc[indices].values.reshape(-1, 1)
+    array = df[columns].values
+    array = df["target"].values
+    array = df.drop(columns=["target"]).values
+    array = pd.concat(frames, axis=1).dropna().values
+    tensor = torch.tensor(df.values)
+    return dataframe.values
+
+These examples qualify only when the receiver is actually a Pandas DataFrame or Series.
+
+ANALYSIS PROCEDURE
+
+First, inspect the complete source file and locate every explicit .values attribute access.
+
+Do not classify the code based on its overall purpose. Locate the actual expressions first.
+
+For each candidate, determine the receiver's type by examining relevant imports, constructors, assignments, aliases, function parameters, and preceding transformations.
+
+Recognize Pandas objects created or returned by operations such as:
+
+- pd.DataFrame(), pd.Series(), pd.read_csv(), pd.read_excel(), and pd.concat().
+- DataFrame filtering, slicing, drop(), merge(), join(), and other Pandas transformations.
+- Column selection, where df["column"] typically returns a Series and df[["column"]] returns a DataFrame.
+- loc and iloc selection, considering whether the expression returns a DataFrame, Series, or scalar.
+- Intermediate assignments and chained Pandas operations.
+
+Both DataFrame.values and Series.values must be considered.
+
+Do not require the receiver's variable name to contain "df", "dataframe", or "series".
+
+If the receiver is established as a Pandas object, report its .values access even when the result is immediately reshaped, indexed, passed to another function, or used as a NumPy or PyTorch input.
+
+COMPLETENESS
+
+Inspect every function, method, loop, conditional branch, and return statement.
+
+Pay particular attention to repeated patterns. If several nearby statements use .values on different Pandas objects, evaluate each statement independently.
+
+Do not stop after identifying the first occurrence in a function.
+
+Do not assume that a function containing one valid violation has no additional violations.
+
+Apply the same detection rule consistently to DataFrames and Series throughout the entire file.
+
+Each distinct qualifying .values access is one finding.
+
+STRICT EXCLUSIONS
+
+Do not report:
+
+- dictionary.values() calls.
+- User-defined values() methods or unrelated objects exposing values.
+- Enum.value or other unrelated attributes.
+- NumPy arrays or non-Pandas objects accessing an attribute named values.
+- Calls to .to_numpy(), np.array(), or np.asarray() unless a qualifying Pandas .values access is explicitly present.
+- Statements that manipulate Pandas objects without accessing .values.
+- General code complexity, exception handling, performance, correctness, or maintainability concerns.
+- Hypothetical conversions inferred from function behavior.
+- Comments, documentation, or string literals.
+
+Never report a code smell merely because a function processes data, creates arrays, or performs conversions.
+
+If there is insufficient evidence that the receiver is a Pandas DataFrame or Series, do not report the candidate as a confirmed violation.
+
+LINE NUMBER AND EVIDENCE VALIDATION
+
+The supplied source code uses 1-based line numbers.
+
+For each finding:
+
+1. Locate the actual source line containing the .values attribute.
+2. Use exactly that line number, not the line of a related assignment, subsequent operation, or enclosing function.
+3. Verify that the quoted .values expression exists on the reported line.
+4. Verify that its receiver is a Pandas DataFrame or Series.
+5. Ensure that the occurrence has not already been reported.
+
+In the reasoning field, quote the actual .values expression and briefly explain the source-code evidence establishing the receiver's Pandas type.
+
+Never invent expressions, receiver types, or line numbers.
+
+FINAL VERIFICATION
+
+Before returning the findings, perform one final source-level scan for .values occurrences that may have been overlooked.
+
+Check especially:
+
+- Consecutive lines containing similar conversions.
+- Series obtained from DataFrame column selections.
+- Repeated conversions in different training, validation, or testing functions.
+- Chained Pandas expressions.
+- .values followed by indexing, reshape(), astype(), or other operations.
+
+Include every confirmed DCA violation and exclude all unrelated findings.
+
+If no qualifying .values accesses exist, return an empty findings array.
+
+Follow the system prompt's required JSON output schema exactly. If an assessment field is required, restrict it to a brief summary of DCA detection and do not introduce unrelated issues.

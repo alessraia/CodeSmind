@@ -1,0 +1,161 @@
+Detect the PyTorch Call Method Misused (PC) code smell in the provided Python source code.
+
+TASK
+
+Identify every explicit call to the forward() method of a PyTorch neural network module that bypasses the module's standard callable interface.
+
+This is a strictly targeted code smell detection task, NOT a general code review. Report only confirmed PC violations.
+
+SMELL DEFINITION
+
+PyTorch modules derived from torch.nn.Module should normally be invoked using module(inputs) rather than module.forward(inputs).
+
+Calling forward() directly bypasses nn.Module.__call__ and can skip framework-managed behavior such as forward hooks.
+
+A violation exists if and only if:
+
+1. The source contains an actual call of the form receiver.forward(...).
+2. The receiver is an instance of torch.nn.Module or a subclass, including framework-specific subclasses such as PyTorch LightningModule.
+
+Both conditions are mandatory.
+
+CRITICAL RULE: CALLS INSIDE THE MODULE CLASS
+
+A direct call to self.forward(...) IS a violation when self is an instance of an nn.Module subclass.
+
+This remains true even when the call appears inside another method of the SAME class.
+
+Calling self.forward(...) does NOT use the module's standard callable interface.
+
+The correct form is self(...), not self.forward(...).
+
+For example:
+
+    class MyModel(nn.Module):
+        def forward(self, x):
+            return self.layer(x)
+
+        def training_step(self, x):
+            prediction = self.forward(x)
+
+        def validation_step(self, x):
+            prediction = self.forward(x)
+
+This example contains TWO violations: one in training_step() and one in validation_step().
+
+Defining or overriding forward() is normal and is NOT itself a violation.
+
+Explicitly calling that method through self.forward(...) IS a violation.
+
+Apply exactly the same rule to subclasses of pl.LightningModule and other classes that inherit directly or indirectly from torch.nn.Module.
+
+Do not treat a direct forward() call as safe merely because it occurs within the module's own class.
+
+SOURCE-FIRST DETECTION PROCEDURE
+
+Step 1 — Locate candidates.
+
+Inspect the complete source file and identify EVERY explicit invocation of .forward(...).
+
+Search across all classes, functions, methods, conditional branches, loops, and nested expressions.
+
+Include calls where forward and its opening parenthesis are separated by whitespace or line breaks.
+
+Do not start by deciding which functions look suspicious. First locate the actual calls.
+
+Step 2 — Resolve receiver types.
+
+For each candidate, identify the receiver and determine whether it is a PyTorch module.
+
+Use the source code to trace:
+
+- Direct or indirect inheritance from nn.Module or torch.nn.Module.
+- Framework-specific subclasses such as pl.LightningModule.
+- Relevant imports, including aliases and imported base classes.
+- Object constructors and assignments.
+- Module attributes such as self.net, self.encoder, or self.actor.
+- Local variables, function parameters, and aliases referring to module instances.
+
+If self.forward(...) occurs in a class that inherits from nn.Module, directly or indirectly, classify it as a violation.
+
+If the class inherits from a framework-specific module subclass, apply the same rule.
+
+Do not assume that an object is a PyTorch module solely because it has a forward() method or a name suggesting a neural network.
+
+For externally imported base classes, use available import and inheritance evidence; do not invent inheritance relationships.
+
+Step 3 — Classify all candidates.
+
+Report every confirmed explicit .forward(...) call on a PyTorch module.
+
+Each distinct source-level invocation must be reported separately.
+
+If multiple invocations appear in the same method, report ALL of them.
+
+If similar calls appear in training, validation, testing, prediction, or action-selection methods, inspect every occurrence independently.
+
+Do not stop after finding the first violation in a method or class.
+
+STRICT EXCLUSIONS
+
+Do not report:
+
+- Definitions of forward() methods.
+- Normal module invocations such as model(x), self(x), or self.net(x).
+- Calls to methods such as evaluate(), predict(), train(), get_action(), or choose_action().
+- Calls that only indirectly execute forward() through another function.
+- forward() calls on ordinary Python objects that are not PyTorch modules.
+- User-defined forward() methods unrelated to PyTorch modules.
+- Functional API calls such as F.relu() or F.smooth_l1_loss().
+- General code quality, complexity, performance, or correctness issues.
+- Hypothetical forward() calls inferred from surrounding code.
+- Comments, documentation, or string literals.
+
+A method named forward() is not sufficient evidence of a violation.
+
+A normal module call such as model(x) is not a violation, even though PyTorch internally executes forward().
+
+A finding requires an actual explicit .forward(...) invocation in the source.
+
+If the receiver cannot be established as a PyTorch module with reasonable confidence, exclude the candidate.
+
+LINE NUMBER AND EVIDENCE VALIDATION
+
+Use the exact 1-based line numbers provided with the source.
+
+For each finding:
+
+1. Verify that the original source contains an explicit .forward(...) invocation.
+2. Identify the receiver and its PyTorch module inheritance or construction evidence.
+3. Report the precise line containing the .forward invocation, or the forward attribute for a multiline call.
+4. In the reasoning field, quote the actual invocation and briefly explain why the receiver is a PyTorch module.
+5. Verify that the same invocation has not already been reported.
+
+Never invent a forward() call, a receiver type, or a source location.
+
+The reported line must correspond to the actual invocation, not a related assignment, enclosing method, or subsequent operation.
+
+COMPLETENESS CHECK
+
+Before returning the result, scan the entire source file once more for every explicit .forward(...) call.
+
+Pay particular attention to:
+
+- self.forward(...) inside nn.Module and LightningModule subclasses.
+- Multiple direct forward() calls within the same method.
+- Repeated calls in training, validation, test, or prediction methods.
+- Calls inside conditionals and loops.
+- Calls through module attributes or local module variables.
+- Classes that inherit indirectly from a PyTorch module.
+
+Ensure that every qualifying occurrence has been reported exactly once.
+
+FINAL OUTPUT
+
+Return only findings that satisfy BOTH mandatory detection conditions.
+
+If no qualifying calls exist, return an empty findings array.
+
+If the system requires an assessment field, make it consistent with the confirmed findings. Never describe self.forward(...) as safe merely because it occurs inside an nn.Module subclass.
+
+Follow the system prompt's required JSON output schema exactly.
